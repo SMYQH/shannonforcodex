@@ -80,7 +80,7 @@ SKILLS = {
 ## Workflow
 1. Read the pre-recon deliverable first; derive targets from it.
 2. Verify scope: only components reachable via the deployed app's network interface are in scope. Exclude CLI-only tools, build scripts, and dev servers.
-3. Correlate live behavior with code: endpoints, params, auth flows, tech stack, defenses (WAF, rate limits). For browser work, call the `playwright_cli` MCP tool directly with exactly one `-s=<session>` argument (for example `{"args": ["-s=recon", "open", "https://target/"]}`). There is no `playwright-cli` skill to load in this plugin.
+3. Correlate live behavior with code: endpoints, params, auth flows, tech stack, defenses (WAF, rate limits). For browser work, set `SHANNON_ALLOWED_ORIGINS` before launching Codex and call the `playwright_cli` MCP tool directly with exactly one `-s=<session>` argument (for example `{"args": ["-s=recon", "open", "https://target/"]}`). There is no `playwright-cli` skill to load in this plugin.
 4. Synthesize the attack-surface map as Markdown and save it with `save_deliverable` using `type: RECON`. This plugin does not expose the original Shannon recon collector tools.
 
 ## Outputs
@@ -193,7 +193,7 @@ SKILLS = {
 """,
 },
 "exploit-injection": {
-"description": "Prove injection impact with payloads, data extraction, or command execution against the live target. Use with an injection exploitation queue.",
+"description": "Prove injection impact with bounded synthetic canary evidence against the authorized test target. Use with an injection exploitation queue.",
 "body": """Use this skill to weaponize the injection queue. Every item must end as exploited or proven false-positive. The workflow below is authoritative; `references/original-prompt.txt` is archival context only.
 
 ## Inputs
@@ -207,7 +207,7 @@ SKILLS = {
 
 ## Workflow
 1. Track each queue item with your host's task tracking; finish one vulnerability fully before moving on. Do not call `todo_write`; that tool name is not available in this plugin.
-2. Follow confirm -> enumerate -> exfiltrate (SQLi) or confirm -> probe -> impact (command injection). Adapt to observed DB/OS, not assumptions. When `injection_task_groups.json` exists, work grouped labels together with one shared proof.
+2. Follow confirm -> bounded canary retrieval (SQLi) or confirm -> bounded canary impact (command injection). Adapt to observed DB/OS, not assumptions. When `injection_task_groups.json` exists, work grouped labels together with one shared proof.
 3. Run probes with your host's request execution and the `playwright_cli` MCP tool (exactly one `-s=<session>` argument) for browser paths. Do not call `task` or `bash` tool names; those are not MCP tools in this plugin.
 4. Document payload, command, output, and discrepancy vs analysis intel for every attempt.
 
@@ -290,11 +290,11 @@ SKILLS = {
 """,
 },
 "exploit-ssrf": {
-"description": "Prove SSRF impact (internal fetch, metadata access, OOB). Use with an SSRF exploitation queue.",
+"description": "Prove SSRF impact with a controlled canary callback or echo response. Use with an SSRF exploitation queue.",
 "body": """Use this skill to prove SSRF against the live target. The workflow below is authoritative; `references/original-prompt.txt` is archival context only.
 
 ## Inputs
-- `ssrf_exploitation_queue.json` plus `ssrf_task_groups.json` when task formation ran, and prior intel. Target URL only; use controlled OOB endpoints (Interactsh, own DNS/HTTP, Burp Collaborator).
+- `ssrf_exploitation_queue.json` plus `ssrf_task_groups.json` when task formation ran, and prior intel. Target URL only; use a controlled OOB canary endpoint that the assessment team owns.
 
 ## Safety guardrails
 - Prove server-side fetch with a controlled canary URL you own (DNS/HTTP callback or echo service). Never request cloud instance-metadata endpoints (for example 169.254.169.254 or metadata.google.internal), never extract credentials or tokens, never pivot into internal networks, and never run broad port scans.
@@ -460,7 +460,7 @@ One task = one source reaching one sink in one output-encoding context. Split on
 "body": """Use this skill as the auth preflight check. The workflow below is authoritative; `references/original-prompt.txt` is archival context only.
 
 ## Workflow
-1. Call the `playwright_cli` MCP tool directly with exactly one `-s=<session>` argument (for example `{"args": ["-s=auth", "open", "https://target/login"]}`). There is no `playwright-cli` skill to load in this plugin.
+1. Set `SHANNON_ALLOWED_ORIGINS` before launching Codex, then call the `playwright_cli` MCP tool directly with exactly one `-s=<session>` argument (for example `{"args": ["-s=auth", "open", "https://target/login"]}`). There is no `playwright-cli` skill to load in this plugin.
 2. Execute the configured login flow exactly once per field (username, password, captcha, and TOTP via the `generate_totp` MCP tool). Any rejection = `login_success:false`, stop, no retry.
 3. On success ONLY, run the `playwright_cli` MCP tool with args `["-s=<session>", "state-save", "<AUTH_STATE_FILE>"]` so later phases reuse the session.
 4. Report where login broke on failure.
@@ -614,6 +614,7 @@ def persistence_contract(name):
 This contract supersedes the original reference's host-only output instructions. This plugin uses `save_deliverable`; `add_exploit` and the original host renderer are unavailable.
 
 - Compose the complete evidence Markdown and call `save_deliverable` with `type: {vuln_class.upper()}_EXPLOITATION_EVIDENCE` and `content`. The tool writes `.shannon/deliverables/{vuln_class}_exploitation_evidence.md` verbatim. Writing Markdown through this tool is required in this plugin.
+- Browser calls require `SHANNON_ALLOWED_ORIGINS` to be set before launch; use only URLs within that allowlist and exactly one isolated `-s=<session>` argument.
 - After each final verdict, save the cumulative document, retaining earlier entries. Each queue ID must have one disposition: exploited, blocked by an external constraint, or false positive with its disproof. Include unprocessed IDs explicitly until resolved. Save a no-findings document for an empty queue.
 - Preserve queue IDs. For each real finding include title, status, severity (only when supported), vulnerable location, overview, auth context without secrets, prerequisites, ordered reproduction steps with commands and observed outputs, proof of impact, and remediation. Separate false positives and unprocessed entries from reportable evidence.
 - The reporting skill reads these per-class files directly. Do not wait for a host to concatenate or render them, or use the reference's `workspace/*_false_positives.md` path.
@@ -629,7 +630,7 @@ This contract supersedes host-only output and filesystem instructions in the ori
 - Inputs: {input_paths or 'the assigned source files and assessment scope'}. Treat reference paths such as `findings/`, the KB, and plan.json as data in these snapshots. Read source evidence from the assessment repository. Do not read unrelated runtime or session data.
 - Output: {output}
 - Replace each original collector call or harness return with an update to the phase snapshot in memory, then call `save_deliverable` with `type: CAPELLA_{phase.upper().replace('-', '_')}` and `content` containing the full JSON object. It writes `.shannon/deliverables/capella_{phase.replace('-', '_')}.json`. Save after each finding and at phase completion; preserve earlier findings, original field names, and history. {CAPELLA_EMPTY_SENTINELS[phase]}
-- Apply the reference's evidence gates and transition rules yourself before saving: research requires a CWE and source evidence; dedupe retains stable IDs and links; review must not mark VALID with UNKNOWN/FAIL checklist entries or PROVISIONALLY_VALID with FAIL; confirmation needs reached-sink evidence and must not promote unresolved checklist entries. Append each decision to history. The storage tool validates phase shape (documents/investigations/findings/classifications keys, architecture KB layout, research CWE plus code_paths) and rejects mismatches; it does not enforce deeper Capella semantics.
+- Apply the reference's evidence gates and transition rules yourself before saving: research requires a CWE and source evidence; dedupe retains stable IDs and links; review must not mark VALID with UNKNOWN/FAIL checklist entries or PROVISIONALLY_VALID with FAIL; confirmation needs reached-sink evidence and must not promote unresolved checklist entries. Append each decision to history. The storage tool validates phase shape, required architecture/threat-model artifacts, finding history, and research evidence; it does not enforce deeper Capella transition semantics.
 
 """
     if name.startswith(("vuln-", "sast-enrichment-")):

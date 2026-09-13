@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo 'Shannon pentest scope guard: authorized test environment only. Production systems are out of scope. Never log credentials; use generate-totp via the shannon-mcp server.'",
+            "command": "echo 'Shannon pentest scope guard: authorized test environment only. Production systems are out of scope. Browser calls require SHANNON_ALLOWED_ORIGINS. Never log credentials; use generate-totp via the shannon-mcp server.'",
             "statusMessage": "Loading Shannon pentest scope guard"
           }
         ]

@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -9,8 +9,53 @@ import { runPlaywright } from "./playwright.js";
 // The host's session cwd remains the assessment workspace, independent of the
 // plugin installation. Manual launches can select a workspace explicitly.
 const assessmentWorkspace = resolve(process.env.SHANNON_WORKSPACE || process.cwd());
+const requiredText = (label) => z.string().refine((value) => value.trim().length > 0, `${label} must not be empty`);
+const assessmentDateSchema = z.string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "assessment_date must use YYYY-MM-DD")
+    .refine((value) => {
+    const [year, month, day] = value.split("-").map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}, "assessment_date must be a valid calendar date");
+function allowedBrowserOrigins() {
+    const raw = process.env.SHANNON_ALLOWED_ORIGINS ?? "";
+    const origins = new Set();
+    for (const value of raw.split(",").map((item) => item.trim()).filter(Boolean)) {
+        let url;
+        try {
+            url = new URL(value);
+        }
+        catch {
+            throw new Error(`Invalid SHANNON_ALLOWED_ORIGINS entry: ${value}`);
+        }
+        if (!["http:", "https:"].includes(url.protocol) || url.pathname !== "/" || url.search || url.hash || url.username || url.password) {
+            throw new Error(`SHANNON_ALLOWED_ORIGINS must contain HTTP(S) origins only: ${value}`);
+        }
+        origins.add(url.origin);
+    }
+    if (origins.size === 0) {
+        throw new Error("Set SHANNON_ALLOWED_ORIGINS before using playwright_cli, for example https://target.example");
+    }
+    return origins;
+}
+function validateBrowserTargets(args) {
+    const origins = allowedBrowserOrigins();
+    const urls = args.flatMap((arg) => arg.match(/https?:\/\/[^\s"'`<>]+/gi) ?? []);
+    for (const value of urls) {
+        let url;
+        try {
+            url = new URL(value.replace(/[),.;]+$/, ""));
+        }
+        catch {
+            throw new Error(`Invalid browser URL: ${value}`);
+        }
+        if (!origins.has(url.origin)) {
+            throw new Error(`Browser target ${url.origin} is outside SHANNON_ALLOWED_ORIGINS`);
+        }
+    }
+}
 const server = new McpServer({ name: "shannon-mcp", version: "1.0.0" }, {
-    instructions: "Shannon pentest tooling. Save deliverables with save_deliverable, generate MFA codes with generate_totp, submit vulnerability queues with submit_exploitation_queue, submit task groups with submit_task_groups, write report metadata with set_report_meta before add_finding calls, and drive the browser via playwright_cli. Keep secrets out of findings.",
+    instructions: "Shannon pentest tooling. Save deliverables with save_deliverable, generate MFA codes with generate_totp, submit vulnerability queues with submit_exploitation_queue, submit task groups with submit_task_groups, write report metadata with set_report_meta before add_finding calls, and drive the browser via playwright_cli. Browser use requires SHANNON_ALLOWED_ORIGINS. Keep secrets out of findings.",
 });
 const deliverableTypes = [
     "CODE_ANALYSIS",
@@ -77,6 +122,19 @@ const taskGroupSchema = z.object({
     reasoning: z.string().min(1),
 });
 const capellaDocumentsSchema = z.object({ documents: z.record(z.string(), z.string()) }).passthrough();
+const capellaHistorySchema = z.array(z.unknown()).min(1);
+const capellaFindingSchema = z.object({
+    finding_id: requiredText("finding_id"),
+    history: capellaHistorySchema,
+}).passthrough();
+const capellaResearchFindingSchema = capellaFindingSchema.extend({
+    title: requiredText("title"),
+    severity: z.enum(["critical", "high", "medium", "low", "info"]),
+    overview: requiredText("overview"),
+    cwe: requiredText("cwe"),
+    code_paths: z.array(requiredText("code_paths entry")).min(1),
+    status: z.literal("PROVISIONALLY_VALID"),
+});
 const capellaInvestigationsSchema = z.object({
     investigations: z.array(z.object({
         title: z.string().min(1),
@@ -85,7 +143,8 @@ const capellaInvestigationsSchema = z.object({
         question: z.string().min(1),
     }).passthrough()),
 }).passthrough();
-const capellaFindingsSchema = z.object({ findings: z.array(z.object({ finding_id: z.string().min(1) }).passthrough()) }).passthrough();
+const capellaFindingsSchema = z.object({ findings: z.array(capellaFindingSchema) }).passthrough();
+const capellaResearchSchema = z.object({ findings: z.array(capellaResearchFindingSchema) }).passthrough();
 const capellaClassificationsSchema = z.object({
     classifications: z.record(z.object({ potentially_flawed: z.boolean(), reason: z.string().min(1) }).passthrough()),
 }).passthrough();
@@ -93,7 +152,7 @@ const capellaSnapshotSchemas = {
     CAPELLA_ARCHITECTURE: capellaDocumentsSchema,
     CAPELLA_THREAT_MODEL: capellaDocumentsSchema,
     CAPELLA_PLAN: capellaInvestigationsSchema,
-    CAPELLA_RESEARCH: capellaFindingsSchema,
+    CAPELLA_RESEARCH: capellaResearchSchema,
     CAPELLA_DEDUPE: capellaFindingsSchema,
     CAPELLA_REVIEW: capellaFindingsSchema,
     CAPELLA_CRITIC: capellaFindingsSchema,
@@ -113,21 +172,41 @@ function validateCapellaSnapshot(type, snapshot) {
     if (type === "CAPELLA_ARCHITECTURE" && typeof snapshot === "object" && snapshot !== null) {
         const docs = snapshot.documents ?? {};
         const keys = Object.keys(docs);
+        if (keys.length === 0)
+            return;
         const hasArchitecture = keys.some((k) => k === "architecture.md" || k.endsWith("/architecture.md"));
         const hasIndex = keys.some((k) => k === "index.md" || k.endsWith("/index.md"));
         const hasEntity = keys.some((k) => k.startsWith("entities/") || k.includes("/entities/"));
-        if (!hasArchitecture || !hasIndex || !hasEntity) {
-            throw new Error("Capella CAPELLA_ARCHITECTURE snapshot must include architecture.md, entities/<component>.md, and index.md in documents");
+        const hasVulnerability = keys.some((k) => k.startsWith("vulnerabilities/") || k.includes("/vulnerabilities/"));
+        const hasDependencies = keys.some((k) => k === "dependencies.json" || k.endsWith("/dependencies.json"));
+        if (!hasArchitecture || !hasIndex || !hasEntity || !hasVulnerability || !hasDependencies) {
+            throw new Error("Capella CAPELLA_ARCHITECTURE snapshot must include architecture.md, entities/<component>.md, vulnerabilities/<CWE-or-class>.md, index.md, and dependencies.json in documents");
+        }
+    }
+    if (type === "CAPELLA_THREAT_MODEL" && typeof snapshot === "object" && snapshot !== null) {
+        const docs = snapshot.documents ?? {};
+        const keys = Object.keys(docs);
+        if (keys.length === 0)
+            return;
+        const hasThreatModel = keys.some((k) => k === "THREAT_MODEL.md" || k.endsWith("/THREAT_MODEL.md"));
+        const hasIntent = Object.values(docs).some((value) => /^Intent:\s*(PRODUCTION|SAMPLE_OR_TEST_ONLY)\s*$/m.test(value));
+        if (!hasThreatModel || !hasIntent) {
+            throw new Error("Capella CAPELLA_THREAT_MODEL snapshot must include THREAT_MODEL.md and Intent: PRODUCTION or Intent: SAMPLE_OR_TEST_ONLY");
         }
     }
     if (type === "CAPELLA_RESEARCH" && typeof snapshot === "object" && snapshot !== null) {
         const findings = snapshot.findings ?? [];
-        for (const f of findings) {
-            if (!f.cwe || !f.code_paths)
-                throw new Error("Capella CAPELLA_RESEARCH findings require cwe and code_paths evidence");
+        if (findings.some((f) => !f.cwe || !Array.isArray(f.code_paths) || f.code_paths.length === 0)) {
+            throw new Error("Capella CAPELLA_RESEARCH findings require cwe and non-empty code_paths evidence");
         }
     }
 }
+const reportMetaSchema = z.object({
+    target: requiredText("target"),
+    assessment_date: assessmentDateSchema,
+    scope: requiredText("scope"),
+    executive_summary: requiredText("executive_summary"),
+}).strict();
 const evidenceItemSchema = z.discriminatedUnion("kind", [
     z.object({ kind: z.literal("prose"), text: z.string() }).strict(),
     z.object({
@@ -137,10 +216,10 @@ const evidenceItemSchema = z.discriminatedUnion("kind", [
 ]);
 const narrativeSchema = z.union([z.string(), z.array(evidenceItemSchema)]);
 const reportFindingSchema = z.object({
-    finding_id: z.string().min(1).describe("Stable report ID, e.g. INJ-01"),
-    title: z.string(),
+    finding_id: requiredText("finding_id").describe("Stable report ID, e.g. INJ-01"),
+    title: requiredText("title"),
     severity: z.enum(["critical", "high", "medium", "low", "info"]),
-    overview: z.string(),
+    overview: requiredText("overview"),
     category: z.string().optional(),
     confidence: z.enum(["high", "medium", "low"]).optional(),
     owasp_category: z.string().optional(),
@@ -160,7 +239,7 @@ const reportFindingSchema = z.object({
     status: z.enum(["exploited", "blocked", "out_of_scope", "blocked_by_constraints", "false_positive"]).nullable().optional(),
     notes: narrativeSchema.nullable().optional(),
     additional_sections: z.array(z.object({
-        heading: z.string(),
+        heading: requiredText("heading"),
         items: z.array(evidenceItemSchema),
     }).strict()).nullable().optional(),
     // Retain the initial plugin's fields for existing callers and saved reports.
@@ -206,7 +285,7 @@ function resolveWorkspacePath(input) {
     return candidate;
 }
 function escapeMarkdownField(value) {
-    return value.replace(/[\\`*_{}[\]()#+!|<>]/g, (ch) => `\\${ch}`);
+    return value.replace(/\r\n|\r|\n/g, " ").replace(/[\\`*_{}[\]()#+!|<>]/g, (ch) => `\\${ch}`);
 }
 function readReport(reportPath) {
     if (!existsSync(reportPath))
@@ -216,12 +295,7 @@ function readReport(reportPath) {
         throw new Error("report.json is malformed: findings must be an array");
     }
     if (parsed.report_meta !== undefined) {
-        const meta = z.object({
-            target: z.string(),
-            assessment_date: z.string(),
-            scope: z.string(),
-            executive_summary: z.string(),
-        }).strict().safeParse(parsed.report_meta);
+        const meta = reportMetaSchema.safeParse(parsed.report_meta);
         if (!meta.success)
             throw new Error("report.json is malformed: report_meta is invalid");
     }
@@ -232,21 +306,24 @@ function readReport(reportPath) {
 }
 function renderNarrative(value) {
     if (typeof value === "string")
-        return [value, ""];
+        return [escapeMarkdownText(value), ""];
     return value.flatMap((item) => {
         if (item.kind === "prose")
-            return [item.text, ""];
+            return [escapeMarkdownText(item.text), ""];
         const { language, content } = item.block;
         const longestFence = Math.max(2, ...(content.match(/`+/g) ?? []).map((run) => run.length));
         const fence = "`".repeat(longestFence + 1);
         return [`${fence}${language.replace(/[\r\n`]/g, "")}`, content, fence, ""];
     });
 }
+function escapeMarkdownText(value) {
+    return value.split(/\r\n|\r|\n/).map(escapeMarkdownField).join("\n");
+}
 function renderReport(report) {
     const lines = ["# Comprehensive Security Assessment Report", ""];
     const meta = report.report_meta;
     if (meta) {
-        lines.push("## Assessment", "", `- Target: ${escapeMarkdownField(meta.target)}`, `- Assessment date: ${escapeMarkdownField(meta.assessment_date)}`, `- Scope: ${escapeMarkdownField(meta.scope)}`, "", meta.executive_summary, "");
+        lines.push("## Assessment", "", `- Target: ${escapeMarkdownField(meta.target)}`, `- Assessment date: ${escapeMarkdownField(meta.assessment_date)}`, `- Scope: ${escapeMarkdownField(meta.scope)}`, "", escapeMarkdownText(meta.executive_summary), "");
     }
     lines.push("## Findings", "");
     if (report.findings.length === 0) {
@@ -254,7 +331,7 @@ function renderReport(report) {
     }
     else {
         for (const finding of report.findings) {
-            lines.push(`### ${escapeMarkdownField(finding.finding_id)}: ${escapeMarkdownField(finding.title)}`, "", `**Severity:** ${escapeMarkdownField(finding.severity)}`, "", finding.overview, "");
+            lines.push(`### ${escapeMarkdownField(finding.finding_id)}: ${escapeMarkdownField(finding.title)}`, "", `**Severity:** ${escapeMarkdownField(finding.severity)}`, "", escapeMarkdownText(finding.overview), "");
             for (const [label, value] of [
                 ["Location", finding.location],
                 ["Vulnerable location", finding.vulnerable_location],
@@ -290,7 +367,7 @@ function renderReport(report) {
     return lines.join("\n");
 }
 function writeFileAtomic(filepath, text) {
-    const tmp = `${filepath}.${process.pid}.tmp`;
+    const tmp = `${filepath}.${process.pid}.${randomUUID()}.tmp`;
     writeFileSync(tmp, text, "utf-8");
     renameSync(tmp, filepath);
 }
@@ -323,7 +400,10 @@ function base32Decode(encoded) {
             out.push((value >>> (bits - 8)) & 255);
         bits %= 8;
     }
-    return Buffer.from(out);
+    const decoded = Buffer.from(out);
+    if (decoded.length === 0)
+        throw new Error("TOTP secret decodes to an empty key");
+    return decoded;
 }
 server.registerTool("save_deliverable", {
     title: "Save deliverable",
@@ -336,10 +416,12 @@ server.registerTool("save_deliverable", {
     outputSchema: {
         filepath: z.string(),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
 }, async ({ type, content, file_path }) => {
     if (content === undefined && file_path === undefined)
         throw new Error("Provide content or file_path");
+    if (content !== undefined && file_path !== undefined)
+        throw new Error("Provide only one of content or file_path");
     if (file_path !== undefined && file_path.trim() === "")
         throw new Error("file_path must be a non-empty workspace-relative path");
     const text = content ?? readFileSync(resolveWorkspacePath(file_path), "utf-8");
@@ -364,7 +446,7 @@ server.registerTool("generate_totp", {
     description: "Emit the current 6-digit TOTP code for a base32 secret. Use during login flows with MFA.",
     inputSchema: {
         secret: z.string().describe("Base32-encoded TOTP secret"),
-        timestamp: z.number().optional().describe("Unix seconds override for testing"),
+        timestamp: z.number().finite().nonnegative().optional().describe("Unix seconds override for testing"),
     },
     outputSchema: {
         code: z.string(),
@@ -384,12 +466,12 @@ server.registerTool("set_report_meta", {
     title: "Set report metadata",
     description: "Write report metadata before add_finding. Rejects target or assessment_date changes in existing storage; select a fresh assessment workspace for a new assessment.",
     inputSchema: {
-        target: z.string(),
-        assessment_date: z.string().describe("YYYY-MM-DD"),
-        scope: z.string(),
-        executive_summary: z.string(),
+        target: requiredText("target"),
+        assessment_date: assessmentDateSchema.describe("YYYY-MM-DD"),
+        scope: requiredText("scope"),
+        executive_summary: requiredText("executive_summary"),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
 }, async ({ target, assessment_date, scope, executive_summary }) => {
     const path = join(deliverablesDir(), "report.json");
     const current = readReport(path);
@@ -474,7 +556,7 @@ server.registerTool("submit_task_groups", {
         count: z.number(),
         filepath: z.string(),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
 }, async ({ vuln_class, groups }) => {
     const labels = new Set();
     for (const group of groups) {
@@ -495,6 +577,9 @@ server.registerTool("submit_task_groups", {
                 throw new Error(`Queue label not found in ${vuln_class} queue: ${label}`);
         }
     }
+    else if (labels.size > 0) {
+        throw new Error(`Cannot submit non-empty task groups without an existing ${vuln_class} exploitation queue`);
+    }
     const filepath = join(dir, `${vuln_class}_task_groups.json`);
     writeFileAtomic(filepath, JSON.stringify({ groups }, null, 2));
     return {
@@ -504,7 +589,7 @@ server.registerTool("submit_task_groups", {
 });
 server.registerTool("playwright_cli", {
     title: "Run playwright-cli",
-    description: "Drive a real browser via the playwright-cli binary for recon, exploitation proof, and login validation. Always pass an isolated session (-s=<session>).",
+    description: "Drive a real browser via the trusted plugin-local playwright-cli binary for recon, exploitation proof, and login validation. SHANNON_ALLOWED_ORIGINS is required; always pass an isolated session (-s=<session>).",
     inputSchema: {
         args: z
             .array(z.string())
@@ -520,8 +605,9 @@ server.registerTool("playwright_cli", {
             .describe("Arguments after `playwright-cli`, including exactly one isolated session argument"),
         timeout_seconds: z.number().min(1).max(600).default(120),
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
 }, async ({ args, timeout_seconds }) => {
+    validateBrowserTargets(args);
     const output = await runPlaywright(args, timeout_seconds, assessmentWorkspace);
     return { content: [{ type: "text", text: output }] };
 });

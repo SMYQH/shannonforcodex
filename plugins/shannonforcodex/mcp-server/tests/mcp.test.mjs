@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,19 +16,22 @@ async function connect(t, { explicitWorkspace = false } = {}) {
   const cwd = explicitWorkspace ? join(root, "launcher directory") : workspace;
   mkdirSync(workspace, { recursive: true });
   mkdirSync(cwd, { recursive: true });
-  const cliDir = join(root, "npm with spaces");
+  const cliDir = join(root, "trusted cli with spaces");
   const pkgDir = join(cliDir, "node_modules/@playwright/cli");
   mkdirSync(pkgDir, { recursive: true });
   writeFileSync(join(pkgDir, "package.json"), JSON.stringify({ name: "@playwright/cli", bin: { "playwright-cli": "entry.cjs" } }));
   writeFileSync(join(pkgDir, "entry.cjs"), `
 const args = process.argv.slice(2);
-console.log(JSON.stringify({ args, cwd: process.cwd() }));
+console.log(JSON.stringify({ args, cwd: process.cwd(), leakedSecret: process.env.SHANNON_TEST_SECRET ?? null }));
 if (args.includes('--fail')) process.exit(7);
 if (args.includes('--wait')) setTimeout(() => {}, 30000);
 `);
   const env = {
     ...getDefaultEnvironment(),
     PATH: `${cliDir}${delimiter}${process.env.PATH ?? ""}`,
+    SHANNON_ALLOWED_ORIGINS: "https://assessment-a.invalid",
+    SHANNON_PLAYWRIGHT_CLI_PATH: join(pkgDir, "entry.cjs"),
+    SHANNON_TEST_SECRET: "must-not-reach-browser",
     ...(explicitWorkspace ? { SHANNON_WORKSPACE: workspace } : {}),
   };
   // Expand the same plugin-root placeholder that the host expands, then start
@@ -79,17 +82,32 @@ test("explicit workspace controls deliverables and the shell-free browser launch
   assert.equal(result.structuredContent.filepath, join(dir, "recon_deliverable.md"));
   const args = ["-s=fixture", "eval", '() => "spaces & | ^ %PATH% $(literal) `tick` \\"quoted\\""'];
   const browser = await call(client, "playwright_cli", { args });
-  assert.deepEqual(JSON.parse(browser.content[0].text), { args, cwd: workspace });
+  assert.deepEqual(JSON.parse(browser.content[0].text), { args, cwd: workspace, leakedSecret: null });
+  await rejects(client, "playwright_cli", { args: ["-s=fixture", "goto", "https://outside.invalid"] }, /outside SHANNON_ALLOWED_ORIGINS/);
   await rejects(client, "playwright_cli", { args: ["--help"] }, /Exactly one/);
   await rejects(client, "playwright_cli", { args: ["-s=one", "-s=two"] }, /Exactly one/);
   await rejects(client, "playwright_cli", { args: ["-s=fixture", "--fail"] }, /exited 7/);
+  assert.equal(existsSync(join(dir, "playwright_cli_output.txt")), false);
   await rejects(client, "playwright_cli", { args: ["-s=fixture", "--wait"], timeout_seconds: 1 }, /ETIMEDOUT/);
+});
+
+test("TOTP follows the RFC 6238 SHA-1 vector", async (t) => {
+  const { client } = await connect(t);
+  const result = await call(client, "generate_totp", {
+    secret: "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+    timestamp: 59,
+  });
+  assert.equal(result.structuredContent.code, "287082");
+  await rejects(client, "generate_totp", { secret: "A", timestamp: 59 }, /empty|secret/);
 });
 
 test("report procedure fields survive MCP validation, persistence, rendering, and reload", async (t) => {
   const { client, dir } = await connect(t);
   await rejects(client, "add_finding", finding, /set_report_meta/);
   await call(client, "set_report_meta", meta);
+  await rejects(client, "set_report_meta", { ...meta, target: "   " }, /must not be empty/);
+  await rejects(client, "set_report_meta", { ...meta, assessment_date: "2026-02-30" }, /calendar date/);
+  await call(client, "set_report_meta", { ...meta, executive_summary: "Summary\n# injected heading" });
   const prose = { kind: "prose", text: "Observed synthetic response" };
   const code = { kind: "code", block: { language: "http", content: "GET /fixture\nX-Literal: ```" } };
   const complete = {
@@ -105,6 +123,7 @@ test("report procedure fields survive MCP validation, persistence, rendering, an
   assert.deepEqual(JSON.parse(readFileSync(reportPath, "utf8")).findings, [complete]);
   const markdown = readFileSync(join(dir, "comprehensive_security_assessment_report.md"), "utf8");
   for (const text of [complete.vulnerable_location, "Step 1: Read fixture", prose.text, code.block.content, "Proof of impact", "Fixture appendix", "````http"]) assert.ok(markdown.includes(text), text);
+  assert.ok(markdown.includes("\\# injected heading"));
   const before = readFileSync(reportPath, "utf8");
   await rejects(client, "add_finding", { ...finding, finding_id: "UNKNOWN", proof_of_impct: "Typo" }, /Unrecognized key/);
   await rejects(client, "add_finding", { ...complete, finding_id: "NESTED", exploitation_steps: [{ title: "Bad", items: [{ ...prose, typo: true }] }] }, /Unrecognized key/);
@@ -159,7 +178,10 @@ test("all exploitation and Capella phase outputs persist through the supported t
   assert.equal(phases.length, 16);
   const capellaFixture = (type) => {
     if (type === "CAPELLA_ARCHITECTURE" || type === "CAPELLA_THREAT_MODEL") {
-      return JSON.stringify({ documents: { "architecture.md": "# Fixture", "entities/fixture.md": "# Fixture", "index.md": "# Fixture" } });
+      if (type === "CAPELLA_ARCHITECTURE") {
+        return JSON.stringify({ documents: { "architecture.md": "# Fixture", "entities/fixture.md": "# Fixture", "vulnerabilities/CWE-79.md": "# Fixture", "index.md": "# Fixture", "dependencies.json": "{}" } });
+      }
+      return JSON.stringify({ documents: { "THREAT_MODEL.md": "# Fixture\n\nIntent: SAMPLE_OR_TEST_ONLY" } });
     }
     if (type === "CAPELLA_PLAN") {
       return JSON.stringify({ investigations: [{ title: "Fixture", target_files: ["fixture.ts"], kb_references: [], question: "Fixture?" }] });
@@ -168,7 +190,7 @@ test("all exploitation and Capella phase outputs persist through the supported t
       return JSON.stringify({ classifications: { "fixture.ts": { potentially_flawed: false, reason: "fixture" } } });
     }
     if (type === "CAPELLA_RESEARCH") {
-      return JSON.stringify({ findings: [{ finding_id: "SYNTHETIC", cwe: "CWE-79", code_paths: ["fixture.ts:1"], history: [{ phase: type }] }] });
+      return JSON.stringify({ findings: [{ finding_id: "SYNTHETIC", title: "Synthetic finding", severity: "low", overview: "Synthetic evidence", cwe: "CWE-79", code_paths: ["fixture.ts:1"], status: "PROVISIONALLY_VALID", history: [{ phase: type }] }] });
     }
     return JSON.stringify({ findings: [{ finding_id: "SYNTHETIC", history: [{ phase: type }] }] });
   };
@@ -184,6 +206,8 @@ test("all exploitation and Capella phase outputs persist through the supported t
   await rejects(client, "save_deliverable", { type: "CAPELLA_RESEARCH", content: "{" }, /JSON|phase validation/);
   await rejects(client, "save_deliverable", { type: "CAPELLA_ARCHITECTURE", content: JSON.stringify({ findings: [] }) }, /phase validation/);
   await rejects(client, "save_deliverable", { type: "CAPELLA_RESEARCH", content: JSON.stringify({ findings: [{ finding_id: "SYNTHETIC" }] }) }, /cwe|code_paths|phase validation/);
+  await call(client, "save_deliverable", { type: "CAPELLA_ARCHITECTURE", content: JSON.stringify({ documents: {} }) });
+  await call(client, "save_deliverable", { type: "CAPELLA_THREAT_MODEL", content: JSON.stringify({ documents: {} }) });
   assert.equal(readFileSync(research, "utf8"), before);
 });
 
@@ -195,6 +219,7 @@ test("workspace containment, empty-path handling, and task-group reconciliation 
   await rejects(client, "save_deliverable", { type: "RECON", file_path: "" }, /non-empty/);
   await rejects(client, "save_deliverable", { type: "RECON", file_path: "../outside.md" }, /workspace/);
   await rejects(client, "save_deliverable", { type: "RECON", file_path: "C:/Windows/win.ini" }, /workspace|relative/);
+  await rejects(client, "submit_task_groups", { vuln_class: "xss", groups: [{ queue_labels: ["XSS-01", "XSS-02"], reasoning: "fixture" }] }, /without an existing/);
   await call(client, "submit_exploitation_queue", { vuln_class: "injection", vulnerabilities: [queueItem("INJ-VULN-01"), queueItem("INJ-VULN-02")] });
   await rejects(client, "submit_task_groups", { vuln_class: "injection", groups: [{ queue_labels: ["INJ-VULN-01", "MISSING"], reasoning: "fixture" }] }, /not found/);
   await rejects(client, "submit_task_groups", { vuln_class: "injection", groups: [{ queue_labels: ["INJ-VULN-01", "INJ-VULN-02"], reasoning: "a" }, { queue_labels: ["INJ-VULN-02", "INJ-VULN-01"], reasoning: "b" }] }, /multiple groups/);

@@ -1,6 +1,6 @@
 {
   "name": "shannonforcodex",
-  "version": "1.0.0+codex.20260906055413",
+  "version": "1.0.0+codex.20260913084122",
   "description": "Autonomous white-box AI pentester for web applications and APIs. Recon, vulnerability analysis, exploitation, and reporting skills with MCP tooling.",
   "author": {
     "name": "Keygraph",
