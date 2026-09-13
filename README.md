@@ -1,31 +1,13 @@
 # Shannon for Codex
 
 这是 Shannon 自主白盒 AI 渗透测试工具的 Codex 插件版本，遵循 `plugin-creator` 的导入规范构建。
-## 安装
 
-### 步骤 1: 添加 marketplace
-
-首先将仓库添加为 marketplace 源:
-
-```bash
-codex plugin marketplace add SMYQH/shannonforcodex --ref main
-```
-
-或使用完整 URL:
+## Install
 
 ```bash
 codex plugin marketplace add https://github.com/SMYQH/shannonforcodex
-```
-
-### 步骤 2: 安装插件
-
-从 marketplace 安装插件:
-
-```bash
 codex plugin add shannonforcodex@SMYQH-shannonforcodex
 ```
-
-### 步骤 3: 构建 MCP 服务器
 
 进入插件目录构建:
 
@@ -35,7 +17,8 @@ npm ci
 npm run build
 ```
 
-重启 Codex 或开启新对话以加载插件的 37 个技能和 7 个 MCP 工具。
+最后重启 Codex 即可。
+
 ## Files
 
 ```
