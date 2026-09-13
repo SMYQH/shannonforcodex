@@ -1,7 +1,27 @@
 # Shannon for Codex
 
 这是 Shannon 自主白盒 AI 渗透测试工具的 Codex 插件版本，遵循 `plugin-creator` 的导入规范构建。
+## 安装
 
+在 Codex 中运行以下命令安装插件:
+
+```bash
+codex plugins install https://github.com/SMYQH/shannonforcodex
+```
+
+或者通过 Codex UI:
+1. 打开 Codex 插件管理器
+2. 选择 "Install from URL"
+3. 输入: `https://github.com/SMYQH/shannonforcodex`
+4. 点击安装并按提示完成
+
+安装后,需要构建 MCP 服务器:
+
+```bash
+cd ~/.codex/plugins/shannonforcodex/mcp-server
+npm ci
+npm run build
+```
 ## Files
 
 ```
