@@ -8,7 +8,7 @@ The marketplace file is nested under `.agents/plugins/`, so pass the sparse path
 
 ```bash
 codex plugin marketplace add https://github.com/SMYQH/shannonforcodex.git --sparse .agents/plugins
-codex plugin add shannonforcodex@SMYQH-shannonforcodex
+codex plugin add shannonforcodex --marketplace shannonforcodex
 ```
 
 Codex installs plugins in a versioned cache. The exact path is:
