@@ -1,0 +1,4 @@
+interface:
+  display_name: "AuthZ Task Groups"
+  short_description: "Deduplicate authz queue into proof tasks"
+  default_prompt: "Use $task-formation-authz before authz exploitation."

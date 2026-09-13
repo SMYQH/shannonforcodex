@@ -1,0 +1,4 @@
+interface:
+  display_name: "AuthZ Analysis"
+  short_description: "IDOR, RBAC, and privilege-escalation review"
+  default_prompt: "Use $vuln-authz to audit access-control enforcement."

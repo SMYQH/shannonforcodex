@@ -1,0 +1,4 @@
+interface:
+  display_name: "Capella Threat Model"
+  short_description: "Actors, boundaries, and attack paths"
+  default_prompt: "Use $capella-threat-model after architecture."

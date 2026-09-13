@@ -1,0 +1,4 @@
+interface:
+  display_name: "Capella Dedupe"
+  short_description: "Merge duplicate research findings"
+  default_prompt: "Use $capella-dedupe after research."

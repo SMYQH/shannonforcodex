@@ -1,0 +1,4 @@
+interface:
+  display_name: "Injection Analysis"
+  short_description: "Source-to-sink injection review with queue output"
+  default_prompt: "Use $vuln-injection to audit backend command construction."

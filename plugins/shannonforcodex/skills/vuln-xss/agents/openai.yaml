@@ -1,0 +1,4 @@
+interface:
+  display_name: "XSS Analysis"
+  short_description: "Source-to-sink XSS review with sink-context payloads"
+  default_prompt: "Use $vuln-xss to audit client-side output handling."

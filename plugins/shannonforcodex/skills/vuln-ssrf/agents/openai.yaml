@@ -1,0 +1,4 @@
+interface:
+  display_name: "SSRF Analysis"
+  short_description: "Server-side request construction review"
+  default_prompt: "Use $vuln-ssrf to audit URL fetch and webhook sinks."

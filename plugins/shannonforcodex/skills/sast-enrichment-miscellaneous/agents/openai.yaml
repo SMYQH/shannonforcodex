@@ -1,0 +1,4 @@
+interface:
+  display_name: "SAST Misc Enrich"
+  short_description: "Normalize misc SAST findings to queue"
+  default_prompt: "Use $sast-enrichment-miscellaneous to enrich static results."

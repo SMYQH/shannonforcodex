@@ -1,0 +1,4 @@
+interface:
+  display_name: "Capella Plan"
+  short_description: "Prioritized research investigations"
+  default_prompt: "Use $capella-plan after threat modeling."

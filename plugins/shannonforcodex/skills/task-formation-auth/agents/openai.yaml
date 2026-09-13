@@ -1,0 +1,4 @@
+interface:
+  display_name: "Auth Task Groups"
+  short_description: "Deduplicate auth queue into proof tasks"
+  default_prompt: "Use $task-formation-auth before auth exploitation."

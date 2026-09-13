@@ -1,0 +1,4 @@
+interface:
+  display_name: "Capella Review"
+  short_description: "Validity and severity review"
+  default_prompt: "Use $capella-review after dedupe."

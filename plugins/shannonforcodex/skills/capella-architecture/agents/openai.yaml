@@ -1,0 +1,4 @@
+interface:
+  display_name: "Capella Architecture"
+  short_description: "Security architecture knowledge base"
+  default_prompt: "Use $capella-architecture to start agentic SAST."

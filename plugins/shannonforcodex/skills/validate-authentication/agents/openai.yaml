@@ -1,0 +1,4 @@
+interface:
+  display_name: "Auth Preflight"
+  short_description: "Browser login check with TOTP and session save"
+  default_prompt: "Use $validate-authentication before authenticated testing."

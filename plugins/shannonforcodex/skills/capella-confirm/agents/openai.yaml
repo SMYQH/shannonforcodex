@@ -1,0 +1,4 @@
+interface:
+  display_name: "Capella Confirm"
+  short_description: "Static confirmation with code evidence"
+  default_prompt: "Use $capella-confirm after critic."

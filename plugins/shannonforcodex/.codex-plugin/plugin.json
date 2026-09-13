@@ -1,0 +1,37 @@
+{
+  "name": "shannonforcodex",
+  "version": "1.0.0+codex.20260906055413",
+  "description": "Autonomous white-box AI pentester for web applications and APIs. Recon, vulnerability analysis, exploitation, and reporting skills with MCP tooling.",
+  "author": {
+    "name": "Keygraph",
+    "url": "https://github.com/keygraph"
+  },
+  "homepage": "https://github.com/SMYQH/shannonforcodex",
+  "repository": "https://github.com/SMYQH/shannonforcodex",
+  "license": "AGPL-3.0-only",
+  "keywords": [
+    "security",
+    "pentest",
+    "penetration-testing",
+    "vulnerability-assessment",
+    "sast"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Shannon Pentest",
+    "shortDescription": "AI-driven white-box pentest: recon, vuln analysis, exploitation, reporting",
+    "longDescription": "Bundle of Shannon pentest skills (pre-recon, recon, 5 vuln classes, 6 exploit tracks, task formation, SAST enrichment, reporting) plus MCP servers for structured deliverables, TOTP, and browser automation.",
+    "developerName": "Keygraph",
+    "category": "Security",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Use Shannon Pentest to run a white-box security assessment of this repo.",
+      "Use Shannon Pentest to analyze injection vulnerabilities in this codebase.",
+      "Use Shannon Pentest to generate an executive security report from scan deliverables."
+    ]
+  }
+}

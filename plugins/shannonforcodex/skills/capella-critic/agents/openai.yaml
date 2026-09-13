@@ -1,0 +1,4 @@
+interface:
+  display_name: "Capella Critic"
+  short_description: "Adversarial false-positive filter"
+  default_prompt: "Use $capella-critic after review."

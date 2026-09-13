@@ -1,0 +1,4 @@
+interface:
+  display_name: "XSS Task Groups"
+  short_description: "Deduplicate XSS queue into proof tasks"
+  default_prompt: "Use $task-formation-xss before XSS exploitation."

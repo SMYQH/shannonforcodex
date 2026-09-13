@@ -1,0 +1,20 @@
+{
+  "name": "shannonforcodex",
+  "interface": {
+    "displayName": "shannonforcodex"
+  },
+  "plugins": [
+    {
+      "name": "shannonforcodex",
+      "source": {
+        "source": "local",
+        "path": "./plugins/shannonforcodex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Security"
+    }
+  ]
+}

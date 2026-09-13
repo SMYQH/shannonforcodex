@@ -1,0 +1,4 @@
+interface:
+  display_name: "Capella Triage"
+  short_description: "Rapid file-level flaw classification"
+  default_prompt: "Use $capella-triage to prioritize files."

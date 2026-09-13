@@ -1,0 +1,4 @@
+interface:
+  display_name: "Injection Task Groups"
+  short_description: "Deduplicate injection queue into proof tasks"
+  default_prompt: "Use $task-formation-injection before injection exploitation."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Attack Surface Map"
+  short_description: "Live attack-surface inventory from code plus browser"
+  default_prompt: "Use $recon to map the network-reachable attack surface."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "SAST XSS Enrich"
+  short_description: "Normalize SAST XSS findings to queue"
+  default_prompt: "Use $sast-enrichment-xss to enrich static XSS results."

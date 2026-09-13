@@ -1,0 +1,4 @@
+interface:
+  display_name: "Executive Report"
+  short_description: "Record verified findings via report tools"
+  default_prompt: "Use $report-executive to produce the executive report."

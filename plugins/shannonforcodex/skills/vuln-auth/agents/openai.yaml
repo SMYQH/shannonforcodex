@@ -1,0 +1,4 @@
+interface:
+  display_name: "Auth Analysis"
+  short_description: "Login, session, MFA, and OAuth flow review"
+  default_prompt: "Use $vuln-auth to audit identity and credential flows."

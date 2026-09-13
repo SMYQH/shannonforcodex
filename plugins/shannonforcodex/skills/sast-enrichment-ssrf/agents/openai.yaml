@@ -1,0 +1,4 @@
+interface:
+  display_name: "SAST SSRF Enrich"
+  short_description: "Normalize SAST SSRF findings to queue"
+  default_prompt: "Use $sast-enrichment-ssrf to enrich static SSRF results."

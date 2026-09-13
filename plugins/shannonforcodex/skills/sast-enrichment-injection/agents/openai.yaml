@@ -1,0 +1,4 @@
+interface:
+  display_name: "SAST Injection Enrich"
+  short_description: "Normalize SAST injection findings to queue"
+  default_prompt: "Use $sast-enrichment-injection to enrich static injection results."

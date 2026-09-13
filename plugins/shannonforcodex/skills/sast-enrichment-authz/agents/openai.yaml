@@ -1,0 +1,4 @@
+interface:
+  display_name: "SAST AuthZ Enrich"
+  short_description: "Normalize SAST authz findings to queue"
+  default_prompt: "Use $sast-enrichment-authz to enrich static authz results."

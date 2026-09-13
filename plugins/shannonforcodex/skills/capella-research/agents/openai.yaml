@@ -1,0 +1,4 @@
+interface:
+  display_name: "Capella Research"
+  short_description: "Confined evidence gathering per plan"
+  default_prompt: "Use $capella-research to gather vuln evidence."

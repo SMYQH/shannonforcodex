@@ -1,0 +1,4 @@
+interface:
+  display_name: "Misc Task Groups"
+  short_description: "Deduplicate misc queue into proof tasks"
+  default_prompt: "Use $task-formation-miscellaneous before misc exploitation."

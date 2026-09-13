@@ -1,0 +1,4 @@
+interface:
+  display_name: "Pre-Recon Baseline"
+  short_description: "White-box codebase review and architecture baseline"
+  default_prompt: "Start a white-box assessment with $pre-recon."

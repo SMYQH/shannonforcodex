@@ -1,0 +1,4 @@
+interface:
+  display_name: "Capella Calibrate"
+  short_description: "Severity and confidence calibration"
+  default_prompt: "Use $capella-calibrate after confirm."
